@@ -1,0 +1,158 @@
+diff --git a/gwinferno/pipeline/utils.py b/gwinferno/pipeline/utils.py
+index d0bc56f..c38ca37 100644
+--- a/gwinferno/pipeline/utils.py
++++ b/gwinferno/pipeline/utils.py
+@@ -160,16 +160,27 @@ Setup B-Spline Priors
+ """
+ 
+ 
+-def bspline_mass_prior(m_nsplines=None, q_nsplines=None, m_tau=1, q_tau=1, name=None, m_cs_sig=15, q_cs_sig=5, m_deg=1, q_deg=1):
++def bspline_mass_prior(m_nsplines=None, q_nsplines=None, m_tau=1, q_tau=1, name=None, m_cs_sig=15, q_cs_sig=5, m_deg=1, q_deg=1, horseshoe = False, lambda_tau = 0.1):
+ 
+     name = "_" + name if name is not None else ""
+-
++    #lambda_tau = 0.1
+     if m_nsplines is not None:
+-        mass_cs = numpyro.sample("mass_cs" + name, dist.Normal(0, m_cs_sig), sample_shape=(m_nsplines,))
++        if not horseshoe:
++            mass_cs = numpyro.sample("mass_cs" + name, dist.Normal(0, m_cs_sig), sample_shape=(m_nsplines,))
++        else:
++            m_lambda = numpyro.sample("mass_lambda" + name, dist.HalfCauchy(1), sample_shape=(m_nsplines,))
++            m_lambda_tau = lambda_tau #numpyro.sample("mass_tau" + name, dist.HalfCauchy(1))
++            mass_cs = numpyro.sample("mass_cs" + name, dist.Normal(0, m_cs_sig * (m_lambda ** 0.5) * m_lambda_tau ))#, sample_shape=(m_nsplines,))
+         numpyro.factor("mass_smoothing_prior" + name, apply_difference_prior(mass_cs, m_tau, degree=m_deg))
+ 
+     if q_nsplines is not None:
+-        q_cs = numpyro.sample("q_cs" + name, dist.Normal(0, q_cs_sig), sample_shape=(q_nsplines,))
++        if not horseshoe:
++            q_cs = numpyro.sample("q_cs" + name, dist.Normal(0, q_cs_sig), sample_shape=(q_nsplines,))
++        else:
++            q_lambda = numpyro.sample("q_lambda" + name, dist.HalfCauchy(1), sample_shape=(q_nsplines,))
++            q_lambda_tau = lambda_tau #numpyro.sample("q_tau" + name, dist.HalfCauchy(1))
++            q_cs = numpyro.sample("q_cs" + name, dist.Normal(0, q_cs_sig * (q_lambda ** 0.5) *q_lambda_tau ))#, sample_shape=(q_nsplines,))
++            
+         numpyro.factor("q_smoothing_prior" + name, apply_difference_prior(q_cs, q_tau, degree=q_deg))
+ 
+     if m_nsplines is not None and q_nsplines is None:
+diff --git a/gwinferno/postprocess/plot.py b/gwinferno/postprocess/plot.py
+index d897fa2..2fe0202 100644
+--- a/gwinferno/postprocess/plot.py
++++ b/gwinferno/postprocess/plot.py
+@@ -1,25 +1,70 @@
+ import matplotlib.pyplot as plt
+ import numpy as np
+-
+-
+-def plot_pdf(x, pdf, label, color="blue", loglog=True, alpha=1.0):
++from scipy.stats import gaussian_kde
++
++def plot_pdf(x, pdf, label, color="blue", loglog=True, alpha=1.0, popsynth_frac = None, popsynth_samples = None, redshift = False):
++    if popsynth_frac is not None:
++        assert popsynth_samples is not None
++        if x.min() > min(popsynth_samples):
++            xmin = min(popsynth_samples)
++            xmin *= (0.9 if xmin>0 else 1.3)
++            x_extra = np.linspace(xmin, x.min(), 100)
++            pdf_extra = np.zeros((pdf.shape[0], len(x_extra)))
++            pdf = np.concatenate((pdf_extra, pdf), axis = -1)
++            
++            x = np.append(x_extra, x)
++        kde = gaussian_kde(popsynth_samples)
++        popsynth_pdf = kde.pdf(x)
++        # popsynth_pdf += kde.pdf(max(x)-x)
++        # popsynth_pdf += kde.pdf(min(x)-x)
++        popsynth_pdf /= np.trapz(popsynth_pdf, x)
++        if redshift:
++            popsynth_pdf/=popsynth_pdf[0]
++        popsynth_pdf = popsynth_pdf[None,:]*popsynth_frac[:,None]
++        pdf_old = pdf.copy()
++        pdf += popsynth_pdf
++        #pdf /= (np.trapz(pdf,x,axis=-1)[:,None])
++    
+     med = np.median(pdf, axis=0)
+     low = np.percentile(pdf, 5, axis=0)
+     high = np.percentile(pdf, 95, axis=0)
++    label = 'With Popsynth'
++    if loglog:
++        plt.loglog(x, med, lw=2, color='orange', alpha=alpha)
++    else:
++        plt.plot(x, med, lw=2, color='orange', alpha=alpha)
+ 
++    plt.fill_between(x, low, high, color='orange', alpha=0.1, label = label)
++    med = np.median(pdf_old, axis=0)
++    low = np.percentile(pdf_old, 5, axis=0)
++    high = np.percentile(pdf_old, 95, axis=0)
++    label = 'Collector only'
+     if loglog:
+-        plt.loglog(x, med, lw=2, color=color, label=label, alpha=alpha)
++        plt.loglog(x, med, lw=2, color=color, alpha=alpha)
+     else:
+-        plt.plot(x, med, lw=2, color=color, label=label, alpha=alpha)
++        plt.plot(x, med, lw=2, color=color, alpha=alpha)
+ 
+-    plt.fill_between(x, low, high, color=color, alpha=0.1)
++    plt.fill_between(x, low, high, color=color, alpha=0.1, label = label)
+ 
++    med = np.median(popsynth_pdf, axis=0)
++    low = np.percentile(popsynth_pdf, 5, axis=0)
++    high = np.percentile(popsynth_pdf, 95, axis=0)
++    label = 'Popsynth only'
++    if loglog:
++        plt.loglog(x, med, lw=2, color="green", alpha=alpha)
++    else:
++        plt.plot(x, med, lw=2, color="green", alpha=alpha)
++
++    plt.fill_between(x, low, high, color="green", alpha=0.1, label = label)
++    
++    
++    plt.legend()
+ 
+-def plot_mass_pdfs(mpdfs, qpdfs, m1, q, names, label, result_dir, save=True, colors=["red", "blue", "green"]):
++def plot_mass_pdfs(mpdfs, qpdfs, m1, q, names, label, result_dir, save=True, colors=["red", "blue", "green"], popsynth_frac = None, popsynth_samples = None):
+ 
+     plt.figure(figsize=(15, 5))
+     for i in range(len(mpdfs)):
+-        plot_pdf(m1, mpdfs[i], names[i], color=colors[i])
++       plot_pdf(m1, mpdfs[i], names[i], color=colors[i], popsynth_frac = popsynth_frac, popsynth_samples = popsynth_samples[:,0] if popsynth_samples is not None else popsynth_samples)
+     plt.ylim(1e-5, 1e0)
+     plt.xlabel("m1")
+     plt.legend()
+@@ -31,8 +76,8 @@ def plot_mass_pdfs(mpdfs, qpdfs, m1, q, names, label, result_dir, save=True, col
+ 
+     plt.figure(figsize=(10, 7))
+     for i in range(len(mpdfs)):
+-        plot_pdf(q, qpdfs[i], names[i], color=colors[i], loglog=False)
+-    plt.ylim(1e-2, 1e1)
++        plot_pdf(q, qpdfs[i], names[i], color=colors[i], loglog=False, popsynth_frac = popsynth_frac, popsynth_samples = popsynth_samples[:,1] if popsynth_samples is not None else popsynth_samples)
++    plt.ylim(1e-2, 1e2)
+     plt.yscale("log")
+     plt.xlabel("q")
+     plt.legend()
+@@ -42,7 +87,6 @@ def plot_mass_pdfs(mpdfs, qpdfs, m1, q, names, label, result_dir, save=True, col
+         plt.savefig(result_dir + f"/mass_ratio_pdf_{label}.png", dpi=100)
+     plt.close()
+ 
+-
+ def plot_spin_pdfs(a_pdfs, tilt_pdfs, aa, cc, names, label, result_dir, save=True, colors=["red", "blue", "green"], secondary=False):
+ 
+     if secondary:
+@@ -75,15 +119,15 @@ def plot_spin_pdfs(a_pdfs, tilt_pdfs, aa, cc, names, label, result_dir, save=Tru
+     plt.close()
+ 
+ 
+-def plot_rate_of_z_pdfs(z_pdfs, z, label, result_dir, save=True):
++def plot_rate_of_z_pdfs(z_pdfs, z, label, result_dir, save=True, popsynth_frac = None, popsynth_samples = None):
+ 
+     plt.figure(figsize=(10, 7))
+-    plot_pdf(z, z_pdfs, "redshift")
++    plot_pdf(z, z_pdfs, "redshift", popsynth_frac = popsynth_frac, popsynth_samples = popsynth_samples if popsynth_samples is not None else popsynth_samples, redshift = True)
+     plt.xlabel("z")
+     plt.ylabel("R(z)")
+     plt.legend()
+-    plt.xlim(z[0], 1.5)
+-    plt.ylim(5, 1e3)
++    # plt.xlim(z[0], 1.5)
++    #plt.ylim(5, 1e3)
+     plt.show()
+     if save:
+         plt.savefig(result_dir + f"/redshift_pdf_{label}.png", dpi=100)
