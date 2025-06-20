@@ -11,7 +11,7 @@ import numpyro.distributions as dist
 from gwinferno.pipeline.analysis import hierarchical_likelihood
 from gwinferno.pipeline.utils import bspline_mass_prior, bspline_redshift_prior
 
-def m1qz_model(pedict, injdict, Nobs, Tobs, Ninj, mass_models, z_model, mmin, mmax, nspline_dict, param_names, rngkey=None, pm1qz_p_dict = None, popsynth_vt = None, horseshoe = False, z_spline = False):
+def m1qz_model(pedict, injdict, Nobs, Tobs, Ninj, mass_models, z_model, mmin, mmax, nspline_dict, param_names, rngkey=None, pm1qz_p_dict = None, popsynth_vt = None, horseshoe = False):
     """ Numpyro model
 
     Args:
@@ -28,6 +28,9 @@ def m1qz_model(pedict, injdict, Nobs, Tobs, Ninj, mass_models, z_model, mmin, mm
         mmax (float): maximum mass
         nspline_dict (dict): dictionary containing the number of splines for each parameter
         param_names (list of str): list of parameters
+        horseshoe (bool): whether or not to use horseshoe prior on spline coefficients
+        pm1qz_p_dict (dict): dictionary containing popsynth weights for 'pe' and 'inj'
+        popsynth_vt (float): surveyed spacetime volume within zmax for popsynth model
 
     """
 
@@ -70,7 +73,7 @@ def m1qz_model(pedict, injdict, Nobs, Tobs, Ninj, mass_models, z_model, mmin, mm
         
 
         p_z = z_model(datadict['redshift'], lamb) if not z_spline else z_model(datadict['redshift'], lamb, z_cs)
-        if use_popsynth:
+        if use_popsynth: # Construct Mixture model
             popsynth_key = "pe" if pe_samples else "injections"
             weights = (f * pm1qz_p_dict[popsynth_key] + (1.0-f) * p_m1q * p_z) / datadict['prior']
         else:

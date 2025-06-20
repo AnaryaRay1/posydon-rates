@@ -36,8 +36,6 @@ from numpyro.infer import NUTS, MCMC, DiscreteHMCGibbs
 
 import matplotlib.pyplot as plt
 import numpy as np
-
-import matplotlib.pyplot as plt
 import corner
 
 
@@ -52,6 +50,9 @@ def run_analysis(numpyro_model, pedict, injdict, constants, param_names, nspline
         nspline_dict (dict): dictionary containing the number of splines for each parameter
         parsargs (ArgumentParser): args from ArgumentParser.parse_args()
         skip_inference (bool, optional): If True, does not perform inference. Defaults to False.
+        horseshoe (bool): whether or not to use horseshoe prior on spline coefficients
+        pm1qz_p_dict (dict): dictionary containing popsynth weights for 'pe' and 'inj'
+        popsynth_vt (float): surveyed spacetime volume within zmax for popsynth model
 
     Returns:
         if skip_inference == False:
@@ -128,7 +129,8 @@ def main():
     horseshoe = args.horseshoe == "True"
     zspline = args.zspline == "True"
     popsynth_file = args.popsynth_file
-        
+
+    # Load popsynth data
     if popsynth_file == '' :
         use_popsynth = False
         popsynth_samples = None    
@@ -219,6 +221,9 @@ def main():
     Ntot = Ndet/posterior["detection_efficiency"].values
 
     if use_popsynth:
+        """
+        Plot mixing fraction, rate components, counts and vts (latter two for disgnostics, will be removed in future versions)
+        """
         f_prior = np.random.uniform(0., 1., args.samples * args.chains)
         f = posterior['mixing frac'].values
         np.savetxt(f"{result_dir}/f.txt", np.c_[f,f_prior])
